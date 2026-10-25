@@ -14,8 +14,8 @@ VITE_SUPABASE_URL="$SUPABASE_URL" VITE_SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY" np
 npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
 # Seed explicitly opt-in because seed.sql replaces synthetic records.
 if [[ "${HR_INSIGHT_SEED:-}" == "yes" ]]; then npx supabase db push --include-seed; else npx supabase db push; fi
-npx supabase functions deploy ai-narasi
-npx supabase functions deploy ai-chat
+npx supabase functions deploy ai-narasi --use-api
+npx supabase functions deploy ai-chat --use-api
 # Secrets through temporary protected file; never command line or git.
 secret_file=$(mktemp)
 chmod 600 "$secret_file"
