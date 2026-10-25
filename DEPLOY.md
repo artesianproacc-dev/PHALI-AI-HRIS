@@ -47,8 +47,9 @@ npx supabase --version
 npx supabase login
 npx supabase link --project-ref "$SUPABASE_PROJECT_REF"
 npx supabase db push --include-seed
-npx supabase functions deploy ai-narasi
-npx supabase functions deploy ai-chat
+npm run prepare:edge
+npx supabase functions deploy ai-narasi --use-api
+npx supabase functions deploy ai-chat --use-api
 ```
 
 `db push --include-seed` menjalankan migrasi dan seed yang dikonfigurasi. Jika seed tidak dijalankan pada proyek yang sudah pernah di-seed, jalankan isi `supabase/seed.sql` melalui SQL Editor dashboard untuk reset demonstrasi secara eksplisit. Jangan menjalankan reset pada proyek produksi.
@@ -139,3 +140,9 @@ Dataset uji menggunakan transaksi dan rollback; tidak menetap. Pengujian PGlite 
 ## Pembaruan dari paket pertama
 
 Ikuti UPDATE.md. Gunakan `npx supabase db push` tanpa `--include-seed`, deploy ulang ai-chat dan ai-narasi, lalu push frontend. Tidak perlu membuat ulang akun lama. Migrasi Storage membuat bucket privat; jangan mengubah bucket ke public. Jika foto/logo tidak bisa diunggah, periksa migrasi 003 dan hak pengguna; jangan menambahkan service role ke frontend.
+
+## Perbaikan bundling helper pada Windows
+
+Jika deploy API menampilkan `Module not found .../_shared/core.ts`, gunakan patch `PHALI-PERBAIKAN-EDGE.zip`. Entrypoint index.ts kini menyertakan kode helper secara langsung sehingga tidak bergantung pada penemuan file lokal oleh CLI. Sumber yang dapat diedit tetap `_shared/core.ts` dan `ai-narasi/handler.ts` / `ai-chat/handler.ts`. Jalankan `npm run prepare:edge` setelah mengubah sumber. Build frontend juga memanggil generator melalui prebuild. Jangan mengedit index.ts hasil generator secara manual.
+
+Patch tidak berisi migrasi database, kredensial atau penggantian konfigurasi Supabase. Terapkan pada folder proyek lama; tidak perlu mengulang seed atau SQL. Deploy cloud masih memerlukan login Supabase pengguna sendiri.

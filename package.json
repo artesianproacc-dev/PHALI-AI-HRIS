@@ -1,7 +1,7 @@
 {
   "name": "phali-ai-hris",
   "private": true,
-  "version": "1.2.1",
+  "version": "1.2.2",
   "type": "module",
   "scripts": {
     "dev": "vite --host 0.0.0.0",
@@ -10,7 +10,9 @@
     "test": "vitest run",
     "icons": "node scripts/icons.mjs",
     "test:sql": "node scripts/test-sql.mjs",
-    "smoke": "node scripts/smoke.mjs"
+    "smoke": "node scripts/smoke.mjs",
+    "prepare:edge": "node scripts/prepare-edge-functions.mjs",
+    "prebuild": "node scripts/prepare-edge-functions.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "2.118.0",
