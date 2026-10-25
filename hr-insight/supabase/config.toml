@@ -1,0 +1,24 @@
+project_id = "hr-insight"
+[api]
+enabled = true
+port = 54321
+schemas = ["public", "graphql_public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 1000
+[db]
+port = 54322
+major_version = 15
+[db.seed]
+enabled = true
+sql_paths = ["./seed.sql"]
+[auth]
+enabled = true
+site_url = "http://localhost:5173/hr-insight/"
+[auth.email]
+enable_signup = true
+enable_confirmations = true
+[functions.ai-narasi]
+verify_jwt = false
+[functions.ai-chat]
+verify_jwt = false
+# Functions verify bearer tokens via auth.getUser(), supporting modern signing keys.

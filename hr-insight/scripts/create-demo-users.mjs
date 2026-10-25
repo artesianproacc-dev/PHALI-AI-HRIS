@@ -1,0 +1,5 @@
+import {createClient}from'@supabase/supabase-js';import{randomBytes}from'node:crypto';
+const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_SERVICE_ROLE_KEY;
+if(!url||!key)throw Error('SUPABASE_URL dan SUPABASE_SERVICE_ROLE_KEY wajib tersedia di lingkungan lokal.');
+const db=createClient(url,key,{auth:{persistSession:false}});
+for(const[email,role]of[['admin@hrinsight.demo','hr_admin'],['staff@hrinsight.demo','hr_staff'],['manager@hrinsight.demo','manager'],['viewer@hrinsight.demo','viewer']]){const password=randomBytes(24).toString('base64url')+'aA1!';const{data,error}=await db.auth.admin.createUser({email,password,email_confirm:true,user_metadata:{nama:({hr_admin:'Admin Demo',hr_staff:'Staf HR Demo',manager:'Manajer Demo',viewer:'Pengamat Demo'})[role]}});if(error){if(/already|registered|exists/i.test(error.message)){console.log(`${email}: sudah ada; kata sandi tidak diubah.`);continue}throw Error(`Gagal membuat ${email}: ${error.message}`)}const{error:pe}=await db.from('profiles').update({role}).eq('id',data.user.id);if(pe)throw Error(`Profil ${email} gagal diperbarui.`);console.log(`${email} | ${role} | kata sandi (simpan sekarang): ${password}`)}
