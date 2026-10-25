@@ -1,5 +1,0 @@
-import{createClient}from'@supabase/supabase-js';
-const url=process.env.SUPABASE_URL,key=process.env.SUPABASE_ANON_KEY,email=process.env.DEMO_EMAIL,password=process.env.DEMO_PASSWORD;
-if(!url||!key||!email||!password)throw Error('Isi SUPABASE_URL, SUPABASE_ANON_KEY, DEMO_EMAIL, DEMO_PASSWORD.');
-const db=createClient(url,key,{auth:{persistSession:false}});const{error}=await db.auth.signInWithPassword({email,password});if(error)throw Error('Login smoke test gagal.');
-try{for(const m of ['ringkasan','turnover','absensi','biaya','rekrutmen','kinerja_pelatihan']){const{data,error}=await db.rpc('rpc_'+m,{p_dari:'2025-10-01',p_sampai:'2026-09-30',p_departemen:null});if(error||!data)throw Error(`RPC ${m} gagal`);console.log(`OK: ${m}`)}const{data,error}=await db.functions.invoke('ai-narasi',{body:{modul:'ringkasan',dari:'2025-10-01',sampai:'2026-09-30',departemen:null}});if(error||!data?.isi)throw Error('Narasi AI gagal');console.log('OK: login, 6 RPC, narasi AI');}finally{await db.auth.signOut()}
