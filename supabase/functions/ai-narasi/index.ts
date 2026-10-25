@@ -14,6 +14,31 @@ export const system='Kamu Ms. Phali (HRD Assistant), asisten analis SDM untuk me
 export async function groq(messages:unknown[],tools?:unknown[],requireTools=false){const key=Deno.env.get('GROQ_API_KEY');if(!key)throw new SafeError('AI belum dikonfigurasi.',503);for(let attempt=0;attempt<3;attempt++){let r:Response;try{r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:AbortSignal.timeout(45000),headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:Deno.env.get('GROQ_MODEL')||'openai/gpt-oss-120b',messages,temperature:0.2,max_completion_tokens:2000,...((Deno.env.get('GROQ_MODEL')||'openai/gpt-oss-120b').includes('gpt-oss')?{reasoning_effort:'low'}:{}),...(tools?{tools,tool_choice:requireTools?'required':'auto'}:{})})})}catch{throw new SafeError('AI tidak dapat dihubungi. Coba lagi sebentar.',503)}if(r.status===429){await r.body?.cancel();if(attempt<2){await new Promise(resolve=>setTimeout(resolve,500*2**attempt));continue}throw new SafeError('Kuota AI sedang penuh, coba lagi sebentar',429)}if(!r.ok){await r.body?.cancel();throw new SafeError('Layanan AI sedang tidak tersedia.',503)}const json=await r.json();const msg=json.choices?.[0]?.message;if(!msg)throw new SafeError('AI belum memberikan jawaban. Coba lagi.',503);return msg;}throw new SafeError('Kuota AI sedang penuh, coba lagi sebentar',429)}
 export function failure(e:unknown){return e instanceof SafeError?respond({error:e.message},e.status):respond({error:'Layanan sedang mengalami gangguan. Coba lagi sebentar.'},500)}
 
+// Only fixed vocabulary derived locally from the question is sent to the model.
+// No raw user question or client-supplied assistant history leaves Supabase.
+export function discussionPlan(question:string, previousModules:string[]=[]){
+ const topicPatterns:[RegExp,string][]=[[/karyawan|pegawai|headcount|gender|usia|masa kerja|sdm|hrd|hris|sumber daya manusia/i,'ringkasan'],[/turnover|retensi|resign|keluar/i,'turnover'],[/absensi|hadir|cuti|telat|izin|alpa/i,'absensi'],[/biaya|payroll|gaji|lembur|kompensasi|anggaran/i,'biaya'],[/rekrut|pelamar|lowongan|hire/i,'rekrutmen'],[/kinerja|skor|pelatihan|training|performa|kompetensi/i,'kinerja_pelatihan']];
+ const selected=topicPatterns.filter(([re])=>re.test(question)).map(([,v])=>v);
+ const hrTopics:[RegExp,string][]=[[/onboarding|orientasi/i,'orientasi karyawan baru'],[/konflik|perselisihan/i,'penanganan konflik tim'],[/motivasi|engagement|keterlibatan|kesejahteraan/i,'keterlibatan dan kesejahteraan tim'],[/sop|prosedur|kebijakan/i,'penyusunan prosedur HR'],[/beban kerja|workload|burnout/i,'evaluasi beban kerja'],[/komunikasi|feedback|umpan balik/i,'komunikasi dan umpan balik']];
+ const topics=hrTopics.filter(([re])=>re.test(question)).map(([,v])=>v);
+ const outsideHR=/cuaca|resep|masakan|ramalan|zodiak|tarot|sepak bola|hasil pertandingan|film bioskop|kode program|pemrograman/i.test(question);
+ const followup=!outsideHR&&/lanjut|tadi|tersebut|itu|opsi|pilihan|solusi|alasannya|kenapa|mengapa|ringkas|singkat|detail|jelaskan|contoh|setuju|bagaimana|rencana|risiko|tindakan|prioritas/i.test(question);
+ const decision=/keputusan|prioritas|rekomendasi|tindakan|langkah|saran|strategi|solusi|rencana|opsi|pilihan|risiko/i.test(question);
+ const denied=/\b(nik|perorangan|individu|siapa|nama karyawan)\b/i.test(question);
+ const greeting=/^(halo|hai|hi|hello|selamat (pagi|siang|sore|malam))[\s,.!]*(ms\.?\s*phali)?[\s,.!?]*$/i.test(question.trim());
+ const previous=previousModules.filter(m=>modules.includes(m));
+ if(!selected.length&&topics.length)selected.push('ringkasan');
+ if(!selected.length&&previous.length&&followup)selected.push(...previous);
+ if(!outsideHR&&decision&&/prioritas.*(?:sdm|hrd)|keputusan.*(?:sdm|hrd)/i.test(question)&&(selected.length===0||selected.join(',')==='ringkasan')){selected.splice(0,selected.length,...modules)}
+ if(!outsideHR&&!selected.length&&decision&&/sdm|hr|tim|karyawan|pegawai/i.test(question))selected.push(...modules);
+ const mode=/ringkas|singkat/i.test(question)?'ringkasan singkat':/contoh/i.test(question)?'contoh penerapan':/kenapa|mengapa|alasan/i.test(question)?'penjelasan alasan dan batasan':decision?'diskusi opsi dan tindak lanjut':'diskusi deskriptif';
+ const option=/\b(kedua|ke-?2|opsi 2|pilihan 2)\b/i.test(question)?'opsi kedua':/\b(pertama|ke-?1|opsi 1|pilihan 1)\b/i.test(question)?'opsi pertama':/\b(ketiga|ke-?3|opsi 3|pilihan 3)\b/i.test(question)?'opsi ketiga':'topik terakhir';
+ const horizon=/\b90\s*hari/i.test(question)?90:/\b60\s*hari/i.test(question)?60:/\b30\s*hari/i.test(question)?30:null;
+ if(outsideHR)selected.splice(0,selected.length);
+ const canonical=JSON.stringify({modul:[...new Set(selected)],topik:topics,tujuan:mode,fokus:option,rencana_hari:horizon});
+ return{selected:[...new Set(selected)],topics,decision,denied,greeting,canonical};
+}
+
 Deno.serve(async req=>{if(req.method==='OPTIONS')return new Response('ok',{headers:cors});try{const c=await context(req),b=await body(req),f=filters(b);if(!modules.includes(b.modul))throw new SafeError('Modul tidak dikenal.');const{data,error}=await c.user.rpc(`rpc_${b.modul}`,f);if(error)throw new SafeError('Ringkasan gagal dimuat.',503);
 // Same RLS scope is currently shared by all authenticated users; include role and
 // aggregate digest to prevent cache reuse after data changes or policy expansion.

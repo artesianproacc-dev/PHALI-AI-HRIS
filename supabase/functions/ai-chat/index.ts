@@ -14,13 +14,69 @@ export const system='Kamu Ms. Phali (HRD Assistant), asisten analis SDM untuk me
 export async function groq(messages:unknown[],tools?:unknown[],requireTools=false){const key=Deno.env.get('GROQ_API_KEY');if(!key)throw new SafeError('AI belum dikonfigurasi.',503);for(let attempt=0;attempt<3;attempt++){let r:Response;try{r=await fetch('https://api.groq.com/openai/v1/chat/completions',{method:'POST',signal:AbortSignal.timeout(45000),headers:{Authorization:`Bearer ${key}`,'Content-Type':'application/json'},body:JSON.stringify({model:Deno.env.get('GROQ_MODEL')||'openai/gpt-oss-120b',messages,temperature:0.2,max_completion_tokens:2000,...((Deno.env.get('GROQ_MODEL')||'openai/gpt-oss-120b').includes('gpt-oss')?{reasoning_effort:'low'}:{}),...(tools?{tools,tool_choice:requireTools?'required':'auto'}:{})})})}catch{throw new SafeError('AI tidak dapat dihubungi. Coba lagi sebentar.',503)}if(r.status===429){await r.body?.cancel();if(attempt<2){await new Promise(resolve=>setTimeout(resolve,500*2**attempt));continue}throw new SafeError('Kuota AI sedang penuh, coba lagi sebentar',429)}if(!r.ok){await r.body?.cancel();throw new SafeError('Layanan AI sedang tidak tersedia.',503)}const json=await r.json();const msg=json.choices?.[0]?.message;if(!msg)throw new SafeError('AI belum memberikan jawaban. Coba lagi.',503);return msg;}throw new SafeError('Kuota AI sedang penuh, coba lagi sebentar',429)}
 export function failure(e:unknown){return e instanceof SafeError?respond({error:e.message},e.status):respond({error:'Layanan sedang mengalami gangguan. Coba lagi sebentar.'},500)}
 
+// Only fixed vocabulary derived locally from the question is sent to the model.
+// No raw user question or client-supplied assistant history leaves Supabase.
+export function discussionPlan(question:string, previousModules:string[]=[]){
+ const topicPatterns:[RegExp,string][]=[[/karyawan|pegawai|headcount|gender|usia|masa kerja|sdm|hrd|hris|sumber daya manusia/i,'ringkasan'],[/turnover|retensi|resign|keluar/i,'turnover'],[/absensi|hadir|cuti|telat|izin|alpa/i,'absensi'],[/biaya|payroll|gaji|lembur|kompensasi|anggaran/i,'biaya'],[/rekrut|pelamar|lowongan|hire/i,'rekrutmen'],[/kinerja|skor|pelatihan|training|performa|kompetensi/i,'kinerja_pelatihan']];
+ const selected=topicPatterns.filter(([re])=>re.test(question)).map(([,v])=>v);
+ const hrTopics:[RegExp,string][]=[[/onboarding|orientasi/i,'orientasi karyawan baru'],[/konflik|perselisihan/i,'penanganan konflik tim'],[/motivasi|engagement|keterlibatan|kesejahteraan/i,'keterlibatan dan kesejahteraan tim'],[/sop|prosedur|kebijakan/i,'penyusunan prosedur HR'],[/beban kerja|workload|burnout/i,'evaluasi beban kerja'],[/komunikasi|feedback|umpan balik/i,'komunikasi dan umpan balik']];
+ const topics=hrTopics.filter(([re])=>re.test(question)).map(([,v])=>v);
+ const outsideHR=/cuaca|resep|masakan|ramalan|zodiak|tarot|sepak bola|hasil pertandingan|film bioskop|kode program|pemrograman/i.test(question);
+ const followup=!outsideHR&&/lanjut|tadi|tersebut|itu|opsi|pilihan|solusi|alasannya|kenapa|mengapa|ringkas|singkat|detail|jelaskan|contoh|setuju|bagaimana|rencana|risiko|tindakan|prioritas/i.test(question);
+ const decision=/keputusan|prioritas|rekomendasi|tindakan|langkah|saran|strategi|solusi|rencana|opsi|pilihan|risiko/i.test(question);
+ const denied=/\b(nik|perorangan|individu|siapa|nama karyawan)\b/i.test(question);
+ const greeting=/^(halo|hai|hi|hello|selamat (pagi|siang|sore|malam))[\s,.!]*(ms\.?\s*phali)?[\s,.!?]*$/i.test(question.trim());
+ const previous=previousModules.filter(m=>modules.includes(m));
+ if(!selected.length&&topics.length)selected.push('ringkasan');
+ if(!selected.length&&previous.length&&followup)selected.push(...previous);
+ if(!outsideHR&&decision&&/prioritas.*(?:sdm|hrd)|keputusan.*(?:sdm|hrd)/i.test(question)&&(selected.length===0||selected.join(',')==='ringkasan')){selected.splice(0,selected.length,...modules)}
+ if(!outsideHR&&!selected.length&&decision&&/sdm|hr|tim|karyawan|pegawai/i.test(question))selected.push(...modules);
+ const mode=/ringkas|singkat/i.test(question)?'ringkasan singkat':/contoh/i.test(question)?'contoh penerapan':/kenapa|mengapa|alasan/i.test(question)?'penjelasan alasan dan batasan':decision?'diskusi opsi dan tindak lanjut':'diskusi deskriptif';
+ const option=/\b(kedua|ke-?2|opsi 2|pilihan 2)\b/i.test(question)?'opsi kedua':/\b(pertama|ke-?1|opsi 1|pilihan 1)\b/i.test(question)?'opsi pertama':/\b(ketiga|ke-?3|opsi 3|pilihan 3)\b/i.test(question)?'opsi ketiga':'topik terakhir';
+ const horizon=/\b90\s*hari/i.test(question)?90:/\b60\s*hari/i.test(question)?60:/\b30\s*hari/i.test(question)?30:null;
+ if(outsideHR)selected.splice(0,selected.length);
+ const canonical=JSON.stringify({modul:[...new Set(selected)],topik:topics,tujuan:mode,fokus:option,rencana_hari:horizon});
+ return{selected:[...new Set(selected)],topics,decision,denied,greeting,canonical};
+}
+
 const mapping:Record<string,string>={get_ringkasan:'ringkasan',get_turnover:'turnover',get_absensi:'absensi',get_biaya:'biaya',get_rekrutmen:'rekrutmen',get_kinerja:'kinerja_pelatihan'};
-const intents:[RegExp,string][]=[[/karyawan|pegawai|headcount|gender|usia|masa kerja|sdm|sumber daya manusia/i,'ringkasan'],[/turnover|retensi|resign|keluar/i,'turnover'],[/absensi|hadir|cuti|telat|izin|alpa/i,'absensi'],[/biaya|payroll|gaji|lembur|kompensasi/i,'biaya'],[/rekrut|pelamar|lowongan|hire/i,'rekrutmen'],[/kinerja|skor|pelatihan|training|performa/i,'kinerja_pelatihan']];
-Deno.serve(async req=>{if(req.method==='OPTIONS')return new Response('ok',{headers:cors});try{const c=await context(req),b=await body(req),f=filters(b);if(typeof b.pertanyaan!=='string'||!b.pertanyaan.trim()||b.pertanyaan.length>1500)throw new SafeError('Pertanyaan wajib diisi, maksimal 1.500 karakter.');const decision=/keputusan|prioritas|rekomendasi|tindakan|langkah|saran|strategi/i.test(b.pertanyaan);const selected=intents.filter(([re])=>re.test(b.pertanyaan)).map(([,v])=>v);if(decision&&!selected.length)selected.push(...Object.values(mapping));
-// Raw questions NEVER leave Supabase: normalize locally to a fixed vocabulary.
-// This also blocks prompt injection and accidental disclosure of employee names.
-if(!selected.length)return respond({isi:'Saya Ms. Phali, HRD Assistant. Saya hanya dapat membantu analitik dan pertimbangan keputusan SDM. Tanyakan ringkasan karyawan, turnover, absensi, biaya, rekrutmen, atau kinerja dan pelatihan.'});
-if(/\b(nik|individu|perorangan|nama|siapa)\b/i.test(b.pertanyaan))return respond({isi:'Untuk menjaga privasi, saya hanya menyajikan angka agregat. Silakan tanyakan ringkasan per departemen atau periode.'});
-const tools=Object.entries(mapping).filter(([,m])=>selected.includes(m)).map(([name,modul])=>({type:'function',function:{name,description:`Ambil metrik agregat ${modul} untuk filter aktif.`,parameters:{type:'object',properties:{},additionalProperties:false}}}));
-const messages:any[]=[{role:'system',content:system+(decision?' Susun jawaban dalam bahasa Indonesia: 1) Temuan berbasis angka, 2) Prioritas yang disarankan dengan alasan, 3) Opsi tindakan dan risikonya, 4) Data tambahan yang perlu diverifikasi. Semua rekomendasi bersifat pertimbangan, bukan keputusan otomatis. Jangan menyarankan pemecatan atau menilai individu. Jangan menggunakan gender atau usia sebagai dasar perlakuan merugikan. Jangan menyatakan penyebab hanya dari korelasi.':'')+' Gunakan tool untuk memperoleh data sebelum menjawab. Pertanyaan telah dinormalisasi untuk privasi; jangan menebak detail tambahan.'},{role:'user',content:`Analisis dan jelaskan metrik SDM berikut: ${selected.join(', ')}. Tujuan: ${decision?'pertimbangan keputusan dan opsi tindakan':'penjelasan deskriptif'}. Filter: ${JSON.stringify(f)}`}];let isi='';for(let i=0;i<4;i++){const msg=await groq(messages,tools,i===0);messages.push(msg);if(!msg.tool_calls?.length){isi=msg.content||'Data belum cukup untuk menjawab.';break}if(msg.tool_calls.length>6)throw new SafeError('Permintaan terlalu kompleks. Coba pertanyaan lebih spesifik.');for(const call of msg.tool_calls){const module=mapping[call.function.name];if(!module||!selected.includes(module))throw new SafeError('Permintaan tool tidak diizinkan.');const{data,error}=await c.user.rpc(`rpc_${module}`,f);if(error)throw new SafeError('Ringkasan gagal dimuat.',503);messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify(data)})}}
-if(!isi){messages.push({role:'user',content:'Batas tool tercapai. Jawab menggunakan angka agregat yang sudah tersedia.'});isi=(await groq(messages)).content||'Data belum cukup untuk menjawab.'}await c.service.from('audit_log').insert({user_id:c.id,aksi:'ai_chat',detail:{modul:selected,filter:f}});return respond({isi});}catch(e){return failure(e)}});
+type Turn={role:'user'|'assistant';content:string};
+type Conversation={filter:Record<string,unknown>;modul:string[];messages:Turn[]};
+Deno.serve(async req=>{
+ if(req.method==='OPTIONS')return new Response('ok',{headers:cors});
+ try{
+  const c=await context(req),b=await body(req),f=filters(b);
+  if(typeof b.pertanyaan!=='string'||!b.pertanyaan.trim()||b.pertanyaan.length>1500)throw new SafeError('Pesan wajib diisi, maksimal 1.500 karakter.');
+  if(b.percakapan_id!=null&&(typeof b.percakapan_id!=='string'||!/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(b.percakapan_id)))throw new SafeError('Identitas percakapan tidak valid.');
+  const id=b.percakapan_id||crypto.randomUUID();
+  const key=`chat:${c.id}:${id}`;
+  let conversation:Conversation={filter:f,modul:[],messages:[]};
+  if(b.percakapan_id){
+   const{data:cached,error}=await c.service.from('ai_cache').select('isi,dibuat_pada').eq('kunci',key).maybeSingle();
+   if(error)throw new SafeError('Percakapan belum dapat dibuka.',503);
+   if(!cached||Date.now()-Date.parse(cached.dibuat_pada)>86400000)throw new SafeError('Percakapan sudah berakhir. Pilih Percakapan baru untuk melanjutkan.',409);
+   try{conversation=JSON.parse(cached.isi)}catch{throw new SafeError('Percakapan tidak dapat dimuat. Mulai percakapan baru.',409)}
+   if(JSON.stringify(conversation.filter)!==JSON.stringify(f))throw new SafeError('Filter telah berubah. Mulai percakapan baru agar data tetap sesuai.',409);
+  }
+  const plan=discussionPlan(b.pertanyaan,conversation.modul);
+  if(plan.denied)return respond({isi:'Saya hanya membahas data agregat dan praktik HRD. Untuk menjaga privasi, saya tidak memberikan data atau penilaian karyawan perorangan.',percakapan_id:b.percakapan_id||null});
+  if(plan.greeting)return respond({isi:'Halo! Saya **Ms. Phali**, HRD Assistant Anda. Kita bisa berdiskusi tentang kondisi SDM, retensi, absensi, biaya, rekrutmen, kinerja, atau praktik HRD. Apa yang ingin Anda bahas?',percakapan_id:b.percakapan_id||null});
+  if(!plan.selected.length)return respond({isi:'Saya bisa membantu diskusi **SDM dan HRD**. Ceritakan topiknya, misalnya turnover, beban kerja, konflik tim, onboarding, atau prioritas pelatihan. Setelah itu, Anda bisa melanjutkan dengan pertanyaan seperti “mengapa begitu?” atau “buat rencana 30 hari”.',percakapan_id:b.percakapan_id||null});
+  const tools=Object.entries(mapping).filter(([,m])=>plan.selected.includes(m)).map(([name,modul])=>({type:'function',function:{name,description:`Ambil metrik agregat ${modul} untuk filter aktif.`,parameters:{type:'object',properties:{},additionalProperties:false}}}));
+  const prompt=system+' Anda sedang berdiskusi dengan Admin atau HRD. Gunakan gaya percakapan yang ramah, langsung menjawab tujuan pesan, dan kaitkan dengan diskusi sebelumnya bila relevan. Jangan selalu mengulang seluruh ringkasan. Pertanyaan user telah dinormalisasi di server untuk privasi. Gunakan tool pada setiap giliran untuk memverifikasi angka terkini. Pisahkan temuan angka dari saran kualitatif. Untuk pertanyaan mengapa, jangan menyimpulkan sebab hanya dari korelasi; sebutkan hipotesis dan cara memeriksanya. Jika diminta opsi kedua/pertama, rujuk opsi pada jawaban sebelumnya; jika tidak jelas, minta klarifikasi singkat. Untuk rencana, berikan tindakan, penanggung jawab berupa peran, dan indikator evaluasi; target numerik harus dilabeli usulan, bukan hasil data. Hindari pemecatan atau penilaian individu serta perlakuan merugikan berdasarkan usia/gender. Jangan mengklaim kepatuhan hukum tanpa sumber. Gunakan Markdown sederhana dengan paragraf pendek dan daftar; tabel hanya bila membantu. Maksimal sekitar 350 kata. Akhiri dengan satu pertanyaan tindak lanjut yang relevan bila membantu diskusi.';
+  const messages:any[]=[{role:'system',content:prompt},...conversation.messages.slice(-8),{role:'user',content:`Tujuan diskusi: ${plan.canonical}. Filter data aktif: ${JSON.stringify(f)}`}];
+  let isi='';
+  for(let i=0;i<4;i++){
+   const msg=await groq(messages,tools,i===0);messages.push(msg);
+   if(!msg.tool_calls?.length){isi=msg.content||'Data belum cukup untuk menjawab. Bisa Anda perjelas topik HRD yang ingin dibahas?';break}
+   if(msg.tool_calls.length>6)throw new SafeError('Pertanyaan terlalu luas. Pilih satu topik HRD terlebih dahulu.');
+   for(const call of msg.tool_calls){const module=mapping[call.function.name];if(!module||!plan.selected.includes(module))throw new SafeError('Permintaan tool tidak diizinkan.');const{data,error}=await c.user.rpc(`rpc_${module}`,f);if(error)throw new SafeError('Ringkasan gagal dimuat.',503);messages.push({role:'tool',tool_call_id:call.id,content:JSON.stringify(data)})}
+  }
+  if(!isi){messages.push({role:'user',content:'Batas tool tercapai. Jawab berdasarkan agregat yang sudah tersedia tanpa menambah angka.'});isi=(await groq(messages)).content||'Saya belum mendapatkan data yang cukup. Mari persempit topiknya.'}
+  const history:Turn[]=[...conversation.messages,{role:'user',content:`Tujuan diskusi: ${plan.canonical}`},{role:'assistant',content:isi}].slice(-8) as Turn[];
+  const{error:saveError}=await c.service.from('ai_cache').upsert({kunci:key,isi:JSON.stringify({filter:f,modul:plan.selected,messages:history}),dibuat_pada:new Date().toISOString()});
+  if(saveError)throw new SafeError('Konteks diskusi belum dapat disimpan. Coba lagi sebentar.',503);
+  await c.service.from('audit_log').insert({user_id:c.id,aksi:'ai_chat',detail:{modul:plan.selected,filter:f,percakapan_id:id}});
+  return respond({isi,percakapan_id:id});
+ }catch(e){return failure(e)}
+});
