@@ -1,4 +1,4 @@
-export const roles={hr_admin:'Admin SDM',hr_staff:'Staf HR',manager:'Manajer',viewer:'Pengamat'} as const;
+export const roles={hr_admin:'Admin SDM',hr_staff:'Staf HRD',manager:'Manajer',viewer:'Pengamat'} as const;
 export type Role=keyof typeof roles;
 export const canManageHR=(role:string)=>['hr_admin','hr_staff'].includes(role);
 export const canUseAI=(role:string)=>['hr_admin','hr_staff','manager'].includes(role);
